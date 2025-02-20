@@ -1,0 +1,1 @@
+/home/jules/Documents/OS/target/i686-none/debug/MONCOMBLE_OS: /home/jules/Documents/OS/src/main.rs /home/jules/Documents/OS/src/memory/mod.rs /home/jules/Documents/OS/src/memory/slab_allocator.rs /home/jules/Documents/OS/src/panic.rs

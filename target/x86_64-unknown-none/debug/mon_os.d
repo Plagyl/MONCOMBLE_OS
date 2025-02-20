@@ -1,0 +1,1 @@
+/home/jules/Documents/OS/target/x86_64-unknown-none/debug/mon_os: /home/jules/Documents/OS/src/main.rs /home/jules/Documents/OS/src/memory/mod.rs /home/jules/Documents/OS/src/memory/slab_allocator.rs /home/jules/Documents/OS/src/panic.rs
