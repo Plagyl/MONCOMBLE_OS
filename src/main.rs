@@ -6,7 +6,6 @@ mod memory;
 
 // Importe la structure "SlabAllocator" exposée dans memory::slab_allocator
 use memory::slab_allocator::SlabAllocator;
-use core::panic::PanicInfo;
 use core::arch::global_asm;
 
 // Création d'un allocateur statique global
@@ -68,7 +67,6 @@ unsafe fn deallocate(ptr: *mut u8) {
     SLAB_ALLOCATOR.deallocate(ptr);
 }
 
-
 // Section ASM minimaliste (facultatif)
 global_asm!(
     r#"
@@ -76,5 +74,4 @@ global_asm!(
     .globl _start
 "#
 );
-
 
