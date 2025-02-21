@@ -15,9 +15,9 @@ panic = "abort"
 [profile.release.package.MONCOMBLE_OS]
 link-arg = ["-nostartfiles", "-nostdlib"]
 
-[unstable]
-build-std = ["core", "compiler_builtins"]
-
 [[bin]]
 name = "MONCOMBLE_OS"
+
+[unstable]
+build-std = ["core", "compiler_builtins"]
 

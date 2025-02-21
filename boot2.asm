@@ -1,5 +1,7 @@
 ; =============================================================================
-; boot2.asm -- Stage2 pour FAT32 + debug
+; boot2.asm -- Stage2 (chargé depuis BOOT2.BIN)
+; Cherche "KERNEL  BIN" dans la root directory, charge le fichier à 0x100000,
+; passe en mode protégé et saute au kernel.
 ; =============================================================================
 [org 0x8000]
 bits 16
@@ -11,10 +13,8 @@ bits 16
 %define CODE32_SEL    0x08
 %define DATA32_SEL    0x10
 
-; Nom de fichier 8.3
 KernelName db "KERNEL  BIN"
 
-; Offsets BPB FAT32
 %define BPB_BytsPerSec 0x0B
 %define BPB_SecPerClus 0x0D
 %define BPB_RsvdSecCnt 0x0E
@@ -22,7 +22,6 @@ KernelName db "KERNEL  BIN"
 %define BPB_FATSz32    0x24
 %define BPB_RootClus   0x2C
 
-; Variables
 bpbBytesPerSec dw 0
 bpbSecPerClus  db 0
 bpbRsvdSecCnt  dw 0
@@ -31,15 +30,10 @@ bpbFATSize     dd 0
 bpbRootClus    dd 0
 KernelStartClus dd 0
 
-SectorBuf  times 512 db 0
-FatSector  times 512 db 0
+SectorBuf times 512 db 0
 
-%define GDT_START (0x8000 + 0x0F00)
 GDT: times 30 db 0
 
-; ----------------------------------------------------------------------------
-; Entrée principale
-; ----------------------------------------------------------------------------
 _start2:
     cli
     mov ax, 0
@@ -49,27 +43,16 @@ _start2:
     mov sp, STACK_16
     sti
 
-    call print_stage2
-
-    ; 1) Lire la BPB
     call read_bpb
-    call print_bpb_ok
-
-    ; 2) Trouver KERNEL.BIN
     call find_kernel
     cmp dword [KernelStartClus], 0
     jne .found
-    call print_nokernel
     jmp .halt
 
 .found:
-    call print_found
-
-    ; 3) Charger le fichier
     mov edx, [KernelStartClus]
     call load_file_clusters
 
-    ; 4) Mode protégé
     cli
     call setup_gdt
     mov cr0, eax
@@ -79,9 +62,6 @@ _start2:
     hlt
     jmp .halt
 
-; ----------------------------------------------------------------------------
-; pm_entry
-; ----------------------------------------------------------------------------
 [bits 32]
 pm_entry:
     mov ax, DATA32_SEL
@@ -91,138 +71,70 @@ pm_entry:
     mov esp, STACK_32
     jmp KERNEL_LOAD
 
-; ----------------------------------------------------------------------------
-; On repasse en 16 bits pour le bas-level
-; ----------------------------------------------------------------------------
 [bits 16]
-
-; ----------------------------------------------------------------------------
-; Fonctions debug
-; ----------------------------------------------------------------------------
-print_stage2:
-    mov si, msg_stage2
-    call print_str
-    ret
-
-print_bpb_ok:
-    mov si, msg_bpb_ok
-    call print_str
-    ret
-
-print_nokernel:
-    mov si, msg_nokernel
-    call print_str
-    ret
-
-print_found:
-    mov si, msg_found
-    call print_str
-    ret
-
-print_str:
-.ps_loop:
-    lodsb
-    cmp al,0
-    je .done
-    mov ah, 0x0E
-    mov bh, 0
-    mov bl, 0x07
-    int 0x10
-    jmp .ps_loop
-.done:
-    ret
-
-msg_stage2   db "Stage2: Hello from Stage2!",0
-msg_bpb_ok   db "Stage2: BPB read OK!",0
-msg_nokernel db "Stage2: KERNEL.BIN not found!",0
-msg_found    db "Stage2: Found KERNEL.BIN, loading...",0
-
-; ----------------------------------------------------------------------------
-; read_bpb, find_kernel, load_file_clusters, read_cluster, next_cluster_in_fat
-; Identiques à ton code, ajoutés ci-dessous
-; ----------------------------------------------------------------------------
 
 read_bpb:
     pusha
     xor eax,eax
-    call bios_read_one_sector  ; LBA=0 => SectorBuf
+    call bios_read_one_sector
     mov ax, [SectorBuf + BPB_BytsPerSec]
     mov [bpbBytesPerSec], ax
-
     mov al, [SectorBuf + BPB_SecPerClus]
     mov [bpbSecPerClus], al
-
     mov ax, [SectorBuf + BPB_RsvdSecCnt]
     mov [bpbRsvdSecCnt], ax
-
-    mov dl, [SectorBuf + BPB_NumFATs]
-    mov [bpbNumFATs], dl
-
-    xor edx, edx
-    mov dx, [SectorBuf + BPB_FATSz32]
-    mov cx, [SectorBuf + BPB_FATSz32+2]
-    shl ecx,16
-    or edx,ecx
-    mov [bpbFATSize], edx
-
-    xor edx,edx
-    mov dx, [SectorBuf + BPB_RootClus]
-    mov cx, [SectorBuf + BPB_RootClus+2]
-    shl ecx,16
-    or edx,ecx
-    mov [bpbRootClus], edx
-
+    mov al, [SectorBuf + BPB_NumFATs]
+    mov [bpbNumFATs], al
+    mov eax, [SectorBuf + BPB_FATSz32]
+    mov [bpbFATSize], eax
+    mov eax, [SectorBuf + BPB_RootClus]
+    mov [bpbRootClus], eax
     popa
     ret
 
 find_kernel:
     pusha
     mov edx, [bpbRootClus]
-
 .searchRoot:
     cmp edx, 0x0FFFFFF8
     jae .notFound
     call read_cluster
     mov ax, [bpbBytesPerSec]
-    xor cx,cx
-    mov cl, [bpbSecPerClus]
-    mul cx
-    mov cx,32
+    movzx ecx, byte [bpbSecPerClus]
+    mul ecx
+    mov cx, 32
     div cx
     mov si, SectorBuf
-
 .entryLoop:
-    cmp ax,0
+    cmp ax, 0
     je .nextCluster
-    mov bl,[si]
-    cmp bl,0
+    cmp byte [si], 0
     je .notFound
+    push cx
     push si
     mov di, KernelName
-    mov cx,11
+    mov cx, 11
     call compare_str
     pop si
-    cmp cx,0
+    pop cx
+    cmp cx, 0
     jne .skip
-
-    mov dx,[si+0x1A]
-    mov ax,[si+0x14]
-    shl eax,16
-    or eax,edx
+    movzx eax, word [si+0x14]
+    movzx edx, word [si+0x1A]
+    shl eax, 16
+    or eax, edx
     mov [KernelStartClus], eax
     jmp .done
-
 .skip:
-    add si,32
+    add si, 32
     dec ax
     jmp .entryLoop
-
 .nextCluster:
     call next_cluster_in_fat
+    mov edx, eax
     jmp .searchRoot
-
 .notFound:
-    mov dword [KernelStartClus],0
+    mov dword [KernelStartClus], 0
 .done:
     popa
     ret
@@ -231,17 +143,17 @@ load_file_clusters:
     pusha
     mov edi, KERNEL_LOAD
 .loadLoop:
-    cmp edx,0x0FFFFFF8
+    cmp edx, 0x0FFFFFF8
     jae .done
     call read_cluster
     mov ax, [bpbBytesPerSec]
-    xor cx,cx
-    mov cl,[bpbSecPerClus]
-    mul cx
-    mov cx,ax
+    movzx ecx, byte [bpbSecPerClus]
+    mul ecx
+    mov cx, ax
     mov esi, SectorBuf
     rep movsb
     call next_cluster_in_fat
+    mov edx, eax
     jmp .loadLoop
 .done:
     popa
@@ -249,125 +161,125 @@ load_file_clusters:
 
 read_cluster:
     pusha
-    mov ax,[bpbRsvdSecCnt]
-    mov bx,[bpbNumFATs]
-    mov edx,[bpbFATSize]
-    mul bx
-    add ax,ax
-    mov cx,[bpbSecPerClus]
-    push cx
-    mov bx,[bpbBytesPerSec]
-    sub edx,2
-    add edx,eax
-    pop cx
-    mov si,0
-
-.readLoop:
-    push ax
-    push bx
-    push cx
-    push dx
+    mov ax, [bpbRsvdSecCnt]
+    movzx eax, ax
+    movzx ecx, byte [bpbNumFATs]
+    mov ebx, [bpbFATSize]
+    imul ecx, ebx
+    add eax, ecx
+    mov ecx, edx
+    sub ecx, 2
+    movzx ebx, byte [bpbSecPerClus]
+    imul ecx, ebx
+    add eax, ecx
+    movzx ecx, byte [bpbSecPerClus]
+    mov edi, SectorBuf
+.read_sector_loop:
+    push eax
     call bios_read_one_sector
-    pop dx
-    inc edx
-    add si,512
-    cmp si,512*8
-    ja .limitError
-    pop cx
-    loop .readLoop
-    pop bx
-    pop ax
-    add edx,2
+    pop eax
+    add edi, 512
+    inc eax
+    loop .read_sector_loop
     popa
-    ret
-
-.limitError:
-    hlt
     ret
 
 next_cluster_in_fat:
     pusha
-    mov eax,edx
-    shl eax,2
-    mov bx,[bpbBytesPerSec]
-    xor edx,edx
+    mov eax, edx
+    mov ebx, 4
+    imul eax, ebx
+    mov esi, eax
+    mov ax, [bpbBytesPerSec]
+    movzx ebx, ax
+    mov eax, esi
+    xor edx, edx
     div ebx
-    ; EAX=secteurFat, EDX=offsetInSector
-    ; (Simplifié: on ne lit pas la FAT pour de vrai)
+    movzx ecx, word [bpbRsvdSecCnt]
+    add ecx, eax
+    mov eax, ecx
+    call bios_read_one_sector2
+    mov eax, dword [SectorBuf2 + edx]
+    and eax, 0x0FFFFFFF
     popa
     ret
 
 compare_str:
     push ax
 .cmp_loop:
-    cmp cx,0
-    je .ok
+    cmp cx, 0
+    je .cmp_done
     lodsb
     scasb
-    jne .diff
+    jne .cmp_diff
     loop .cmp_loop
-.ok:
+.cmp_done:
     pop ax
     ret
-.diff:
-    mov cx,1
+.cmp_diff:
+    mov cx, 1
     pop ax
     ret
 
 bios_read_one_sector:
     pusha
-    mov word [dap+0],0x0010
-    mov byte [dap+2],0
-    mov byte [dap+3],1
-    mov word [dap+4],si
-    mov word [dap+6],ds
-    mov [dapLBA],eax
-    mov [dapLBA+4],dword 0
-    mov dword [dap+8],0
-
-    mov ax,cs
-    mov es,ax
-    lea si,[dap]
-    mov ah,0x42
-    mov dl,0x80
+    mov byte [dap_size], 16
+    mov byte [dap+1], 0
+    mov word [dap+2], 1
+    mov word [dap+4], SectorBuf
+    mov word [dap+6], ds
+    mov dword [dap+8], eax
+    mov dword [dap+12], 0
+    mov ah, 0x42
+    mov dl, 0x80
+    lea si, [dap]
     int 0x13
     popa
     ret
 
-dap: times 16 db 0
-dapLBA: times 8 db 0
+bios_read_one_sector2:
+    pusha
+    mov byte [dap_size], 16
+    mov byte [dap+1], 0
+    mov word [dap+2], 1
+    mov word [dap+4], SectorBuf2
+    mov word [dap+6], ds
+    mov dword [dap+8], eax
+    mov dword [dap+12], 0
+    mov ah, 0x42
+    mov dl, 0x80
+    lea si, [dap]
+    int 0x13
+    popa
+    ret
 
 setup_gdt:
     xor eax,eax
     inc eax
-    mov bx,GDT_START
-    ; Null
-    mov word [bx],0
-    mov word [bx+2],0
-    mov word [bx+4],0
-    mov word [bx+6],0
-
-    ; Code32
-    mov word [bx+8],0xFFFF
-    mov word [bx+10],0x0000
-    mov byte [bx+12],0x00
-    mov byte [bx+13],0x9A
-    mov byte [bx+14],0xCF
-    mov byte [bx+15],0x00
-
-    ; Data32
-    mov word [bx+16],0xFFFF
-    mov word [bx+18],0x0000
-    mov byte [bx+20],0x00
-    mov byte [bx+21],0x92
-    mov byte [bx+22],0xCF
-    mov byte [bx+23],0x00
-
-    mov word [bx+24],24-1
-    mov word [bx+26],bx
-    mov word [bx+28],0
+    mov bx, GDT
+    mov dword [bx+0], 0
+    mov dword [bx+4], 0
+    mov word [bx+8], 0xFFFF
+    mov word [bx+10], 0x0000
+    mov byte [bx+12], 0x00
+    mov byte [bx+13], 0x9A
+    mov byte [bx+14], 0xCF
+    mov byte [bx+15], 0x00
+    mov word [bx+16], 0xFFFF
+    mov word [bx+18], 0x0000
+    mov byte [bx+20], 0x00
+    mov byte [bx+21], 0x92
+    mov byte [bx+22], 0xCF
+    mov byte [bx+23], 0x00
+    mov word [bx+24], 24-1
+    mov word [bx+26], bx
+    mov dword [bx+28], 0
     lgdt [bx+24]
     ret
 
-times 4096 - ($-$$) db 0
+SectorBuf2 times 512 db 0
+dap_size db 0
+dap: times 16 db 0
+
+times 4096 - ($ - $$) db 0
 

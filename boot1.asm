@@ -1,33 +1,17 @@
 ; ============================================================================
-; boot1.asm – Stage1 Hybride (512 octets) corrigé
-; On veut laisser intacts les 94 premiers octets (BPB) et les 2 derniers (signature)
-; et remplacer la zone 94..509 par notre code.
+; boot1.asm -- Stage1 minimal (boot sector de la partition FAT32)
+; Conserve la BPB (octets 0..93) et la signature (octets 510..511)
+; depuis bootsector_original.bin, et charge Stage2 à partir du secteur 1.
 ; ============================================================================
 [org 0]
+bits 16
 
-; 1) Inclure les 94 premiers octets du bootsector original (BPB)
-;    (Assurez-vous que votre NASM supporte cette syntaxe ou préparez un fichier "bpb.bin" de 94 octets.)
+; Inclure les 94 premiers octets du bootsector original (BPB)
 incbin "bootsector_original.bin", 0, 94
 
-; 2) Zone de code qui va remplacer les octets 94..509.
-; La zone disponible est de 509 - 94 + 1 = 416 octets maximum.
 start:
     cli
-
-    ; Affichage d'un message de debug
-    mov si, msg_stage1
-.print_loop:
-    lodsb
-    cmp al, 0
-    je .print_done
-    mov ah, 0x0E
-    mov bh, 0
-    mov bl, 0x07  ; attributs : blanc sur noir
-    int 0x10
-    jmp .print_loop
-.print_done:
-
-    ; Configuration des segments
+    ; Configuration minimale des segments
     mov ax, 0x07C0
     mov ds, ax
     mov es, ax
@@ -35,38 +19,29 @@ start:
     mov sp, 0x7C00
     sti
 
-    ; Préparation du DAP pour lire 8 secteurs (Stage2)
-    mov word [dap+0], 0x0010
-    mov byte [dap+2], 0
-    mov byte [dap+3], 8
-    mov word [dap+4], 0x8000
-    mov word [dap+6], 0x0000
-    xor eax, eax
-    inc eax
-    mov [dap_lba], eax
-    mov [dap_lba+4], eax
-    mov dword [dap+8], eax
+    ; Préparer le Disk Address Packet (DAP) pour lire 8 secteurs
+    mov byte [dap_size], 16
+    mov byte [dap+1], 0
+    mov word [dap+2], 8         ; Lire 8 secteurs
+    mov word [dap+4], 0x8000     ; Charger à l'adresse 0x8000
+    mov word [dap+6], 0          ; Segment = 0x0000 (physique = 0x8000)
+    mov dword [dap+8], 1        ; LBA = 1 (Stage2 se trouve à partir du secteur 1)
     mov dword [dap+12], 0
-
-    mov ax, cs
-    mov es, ax
-    lea si, [dap]
     mov ah, 0x42
     mov dl, 0x80
+    lea si, [dap]
     int 0x13
 
+    ; Sauter vers Stage2 chargé à 0x8000
     jmp 0x0000:0x8000
 
-msg_stage1 db "Stage1: Hello from Stage1!",0
+; Structure DAP
+dap_size db 0
+dap: times 16 db 0
 
-; DAP et données associées
-dap:       times 16 db 0
-dap_lba:   dd 0, 0
-
-; 3) Remplir (avec des zéros) jusqu'à atteindre l'octet 510
+; Remplissage jusqu'à l'octet 510
 times 510 - ($ - $$) db 0
 
-; 4) Inclure la signature de boot (2 octets) depuis bootsector_original.bin.
-; Ici, on extrait les 2 derniers octets (offset 510, longueur 2).
+; Inclure la signature (2 octets) depuis bootsector_original.bin
 incbin "bootsector_original.bin", 510, 2
 
