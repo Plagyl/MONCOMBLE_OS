@@ -50,8 +50,7 @@ Cette commande démarre QEMU, qui tentera de booter depuis l’image `disk.img` 
 
 ## 4. Évolutions et avertissements
 
-- Le projet demeure expérimental : QEMU va se figer sur “Booting from Hard Disk…” car ne trouve pas de code MBR standard.  
-- Pour réussir un boot complet, il est souvent nécessaire d’installer un MBR minimal ou de forcer le mode disquette (`-fda disk.img`).  
+- Le projet demeure expérimental : QEMU va se figer sur “Booting from Hard Disk…” car ne trouve pas de code MBR standard.   
 - Le script build_full.sh montre néanmoins tout le workflow : création d’une partition FAT32, placement d’un bootloader en ASM, compilation d’un kernel Rust no_std.
 
 ---
