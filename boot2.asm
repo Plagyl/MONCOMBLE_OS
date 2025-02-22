@@ -1,6 +1,6 @@
 ; =============================================================================
-; boot2.asm -- Stage2 (chargé depuis BOOT2.BIN)
-; Cherche "KERNEL  BIN" dans la root directory, charge le fichier à 0x100000,
+; boot2.asm -- Stage2 (chargé depuis LBA=100 par Stage1)
+; Cherche "KERNEL  BIN" dans la FAT partitionless, le charge à 0x100000,
 ; passe en mode protégé et saute au kernel.
 ; =============================================================================
 [org 0x8000]
@@ -43,16 +43,21 @@ _start2:
     mov sp, STACK_16
     sti
 
+    ; Lire la BPB depuis LBA=0 (secteur 0, partitionless)
     call read_bpb
+
+    ; Rechercher "KERNEL  BIN" dans la root directory
     call find_kernel
     cmp dword [KernelStartClus], 0
     jne .found
     jmp .halt
 
 .found:
+    ; Charger KERNEL.BIN à 0x100000
     mov edx, [KernelStartClus]
     call load_file_clusters
 
+    ; Passer en mode protégé
     cli
     call setup_gdt
     mov cr0, eax
@@ -73,6 +78,7 @@ pm_entry:
 
 [bits 16]
 
+; --- read_bpb : lit LBA=0 => SectorBuf, extrait la BPB
 read_bpb:
     pusha
     xor eax,eax
@@ -92,6 +98,7 @@ read_bpb:
     popa
     ret
 
+; --- find_kernel : recherche "KERNEL  BIN"
 find_kernel:
     pusha
     mov edx, [bpbRootClus]
@@ -139,6 +146,7 @@ find_kernel:
     popa
     ret
 
+; --- load_file_clusters : charge KERNEL.BIN à KERNEL_LOAD
 load_file_clusters:
     pusha
     mov edi, KERNEL_LOAD
@@ -159,6 +167,7 @@ load_file_clusters:
     popa
     ret
 
+; --- read_cluster : calcule LBA, lit [bpbSecPerClus] secteurs => SectorBuf
 read_cluster:
     pusha
     mov ax, [bpbRsvdSecCnt]
@@ -184,6 +193,7 @@ read_cluster:
     popa
     ret
 
+; --- next_cluster_in_fat : EDX=cluster => EAX=cluster_suivant
 next_cluster_in_fat:
     pusha
     mov eax, edx
@@ -204,6 +214,7 @@ next_cluster_in_fat:
     popa
     ret
 
+; --- compare_str
 compare_str:
     push ax
 .cmp_loop:
@@ -217,10 +228,11 @@ compare_str:
     pop ax
     ret
 .cmp_diff:
-    mov cx, 1
+    mov cx,1
     pop ax
     ret
 
+; --- bios_read_one_sector
 bios_read_one_sector:
     pusha
     mov byte [dap_size], 16
@@ -232,11 +244,12 @@ bios_read_one_sector:
     mov dword [dap+12], 0
     mov ah, 0x42
     mov dl, 0x80
-    lea si, [dap]
+    lea si,[dap]
     int 0x13
     popa
     ret
 
+; --- bios_read_one_sector2
 bios_read_one_sector2:
     pusha
     mov byte [dap_size], 16
@@ -248,7 +261,7 @@ bios_read_one_sector2:
     mov dword [dap+12], 0
     mov ah, 0x42
     mov dl, 0x80
-    lea si, [dap]
+    lea si,[dap]
     int 0x13
     popa
     ret
@@ -257,20 +270,27 @@ setup_gdt:
     xor eax,eax
     inc eax
     mov bx, GDT
+    ; Null descriptor
     mov dword [bx+0], 0
     mov dword [bx+4], 0
+
+    ; Code segment: base=0, limit=0xFFFFF (4K gran), type=0x9A
     mov word [bx+8], 0xFFFF
     mov word [bx+10], 0x0000
     mov byte [bx+12], 0x00
     mov byte [bx+13], 0x9A
     mov byte [bx+14], 0xCF
     mov byte [bx+15], 0x00
+
+    ; Data segment: base=0, limit=0xFFFFF (4K gran), type=0x92
     mov word [bx+16], 0xFFFF
     mov word [bx+18], 0x0000
     mov byte [bx+20], 0x00
     mov byte [bx+21], 0x92
     mov byte [bx+22], 0xCF
     mov byte [bx+23], 0x00
+
+    ; GDTR
     mov word [bx+24], 24-1
     mov word [bx+26], bx
     mov dword [bx+28], 0
